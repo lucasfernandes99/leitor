@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Controle de Acesso - Festa</title>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+  body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+  h1 { text-align: center; }
+  button { margin: 5px; padding: 10px; }
+  #resultado { margin-top: 20px; background: #fff; padding: 15px; border-radius: 10px; }
+</style>
+</head>
+<body>
+<h1>🎟️ Controle de Acesso</h1>
+
+<input type="file" id="importar" accept=".json">
+<button onclick="iniciarCamera()">Iniciar Câmera</button>
+
+<div id="reader" style="width:300px; margin:auto;"></div>
+<div id="resultado"></div>
+<p id="resumo"></p>
+
+<script>
+let familias = {};
+let totalEntradas = 0, totalPessoas = 0;
+
+document.getElementById('importar').addEventListener('change', importar);
+
+function importar(evt) {
+  const file = evt.target.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    const data = JSON.parse(e.target.result);
+    data.forEach(f => familias[f.id] = f);
+    localStorage.setItem('familias', JSON.stringify(familias));
+    alert('Lista de famílias carregada com sucesso!');
+    atualizarResumo();
+  };
+  reader.readAsText(file);
+}
+
+function iniciarCamera() {
+  const leitor = new Html5Qrcode("reader");
+  leitor.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: 250 },
+    (id) => processarQRCode(id, leitor),
+    (erro) => {}
+  );
+}
+
+function processarQRCode(id, leitor) {
+  leitor.stop();
+  if (!familias[id]) {
+    alert('QR Code inválido!');
+    return;
+  }
+
+  if (familias[id].entrou) {
+    alert(`⚠️ ${familias[id].nome} já entrou!`);
+  } else {
+    familias[id].entrou = true;
+    localStorage.setItem('familias', JSON.stringify(familias));
+    totalEntradas++;
+    totalPessoas += familias[id].qtd;
+    document.getElementById('resultado').innerHTML = `
+      ✅ <strong>${familias[id].nome}</strong><br>
+      ${familias[id].qtd} convidados<br>
+      <em>Entrada registrada!</em>`;
+    atualizarResumo();
+  }
+
+  setTimeout(() => iniciarCamera(), 1500);
+}
+
+function atualizarResumo() {
+  const lista = Object.values(familias);
+  const totalFam = lista.length;
+  const totalEnt = lista.filter(f => f.entrou).length;
+  const totalPess = lista.filter(f => f.entrou).reduce((s, f) => s + f.qtd, 0);
+  document.getElementById('resumo').innerHTML = `
+    <br><strong>Total famílias:</strong> ${totalFam} |
+    <strong>Entraram:</strong> ${totalEnt} |
+    <strong>Pessoas:</strong> ${totalPess}`;
+}
+</script>
+</body>
+</html>
