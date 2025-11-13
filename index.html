@@ -69,11 +69,20 @@ function importar(evt) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
+    // Zera o histórico ao carregar nova lista
+    if (confirm('Carregar nova lista irá apagar o histórico atual. Deseja continuar?')) {
+      historico = [];
+      localStorage.removeItem('historico');
+    }
+
     const data = JSON.parse(e.target.result);
+    familias = {};
     data.forEach(f => familias[f.id] = f);
     localStorage.setItem('familias', JSON.stringify(familias));
-    alert('✅ Lista de famílias carregada com sucesso!');
+
+    alert('✅ Nova lista de famílias carregada com sucesso!');
     atualizarResumo();
+    atualizarHistorico();
   };
   reader.readAsText(file);
 }
@@ -110,7 +119,7 @@ function processarQRCode(id, leitor) {
       criancas: f.criancas,
       hora
     });
-    if (historico.length > 100) historico.pop();
+    if (historico.length > 200) historico.pop();
     localStorage.setItem('familias', JSON.stringify(familias));
     localStorage.setItem('historico', JSON.stringify(historico));
     document.getElementById('resultado').innerHTML = `
