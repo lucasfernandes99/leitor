@@ -2,38 +2,77 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de Festa QR</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <style>
-  body { font-family: Arial; margin: 20px; background: #f5f5f5; }
-  h1 { text-align: center; }
-  button { margin: 5px; padding: 10px; }
-  #resultado { margin-top: 20px; background: #fff; padding: 15px; border-radius: 10px; }
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0; padding: 0;
+    background: #f5f5f5;
+    display: flex; flex-direction: column;
+    align-items: center; min-height: 100vh;
+  }
+  h1 { text-align: center; font-size: 1.4rem; margin-top: 10px; }
+  #reader { width: 90%; max-width: 350px; margin: 10px auto; }
+  button, input[type=file] {
+    padding: 10px 14px; margin: 5px;
+    border: none; border-radius: 6px;
+    background: #007bff; color: white;
+    font-size: 1rem; cursor: pointer;
+  }
+  button:hover { background: #0056b3; }
+  #resultado {
+    margin: 10px auto; width: 90%;
+    background: #fff; padding: 10px;
+    border-radius: 10px; text-align: center;
+    font-size: 1.1rem;
+  }
+  #resumo {
+    background: #e9ecef; width: 90%;
+    padding: 10px; border-radius: 10px;
+    text-align: center; margin-top: 10px;
+  }
+  #historico {
+    width: 90%; background: #fff; margin-top: 10px;
+    padding: 10px; border-radius: 10px;
+    max-height: 250px; overflow-y: auto;
+    font-size: 0.95rem;
+  }
+  #historico h3 { margin: 5px 0; text-align: center; }
+  .entrada { border-bottom: 1px solid #ccc; padding: 5px 0; }
+  .entrada:last-child { border-bottom: none; }
 </style>
 </head>
 <body>
 <h1>🎟️ Controle de Acesso</h1>
 
 <input type="file" id="importar" accept=".json">
-<button onclick="iniciarCamera()">Iniciar Câmera</button>
+<button onclick="iniciarCamera()">📷 Iniciar Câmera</button>
 
-<div id="reader" style="width:300px; margin:auto;"></div>
+<div id="reader"></div>
 <div id="resultado"></div>
-<p id="resumo"></p>
+<div id="resumo"></div>
+<div id="historico">
+  <h3>Histórico de Entradas</h3>
+  <div id="listaHistorico"></div>
+</div>
 
 <script>
 let familias = {};
+let historico = JSON.parse(localStorage.getItem('historico')) || [];
 
 document.getElementById('importar').addEventListener('change', importar);
 
 function importar(evt) {
   const file = evt.target.files[0];
+  if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     const data = JSON.parse(e.target.result);
     data.forEach(f => familias[f.id] = f);
     localStorage.setItem('familias', JSON.stringify(familias));
-    alert('Lista de famílias carregada com sucesso!');
+    alert('✅ Lista de famílias carregada com sucesso!');
     atualizarResumo();
   };
   reader.readAsText(file);
@@ -43,31 +82,45 @@ function iniciarCamera() {
   const leitor = new Html5Qrcode("reader");
   leitor.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: 250 },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
     (id) => processarQRCode(id, leitor),
-    (erro) => {}
+    () => {}
   );
 }
 
 function processarQRCode(id, leitor) {
   leitor.stop();
+
   if (!familias[id]) {
-    alert('QR Code inválido!');
+    alert('❌ QR Code inválido!');
+    setTimeout(iniciarCamera, 1000);
     return;
   }
 
-  if (familias[id].entrou) {
-    alert(`⚠️ ${familias[id].nome} já entrou!`);
+  const f = familias[id];
+
+  if (f.entrou) {
+    alert(`⚠️ ${f.nome} já entrou anteriormente!`);
   } else {
-    familias[id].entrou = true;
+    f.entrou = true;
+    const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    historico.unshift({
+      nome: f.nome,
+      adultos: f.adultos,
+      criancas: f.criancas,
+      hora
+    });
+    if (historico.length > 100) historico.pop(); // limita tamanho
     localStorage.setItem('familias', JSON.stringify(familias));
+    localStorage.setItem('historico', JSON.stringify(historico));
     document.getElementById('resultado').innerHTML = `
-      ✅ <strong>${familias[id].nome}</strong><br>
-      ${familias[id].adultos} adultos e ${familias[id].criancas} crianças<br>
-      <em>Entrada registrada!</em>`;
+      ✅ <strong>${f.nome}</strong><br>
+      ${f.adultos} adultos e ${f.criancas} crianças<br>
+      <em>Entrada registrada às ${hora}</em>`;
     atualizarResumo();
+    atualizarHistorico();
   }
-  setTimeout(() => iniciarCamera(), 1500);
+  setTimeout(iniciarCamera, 1500);
 }
 
 function atualizarResumo() {
@@ -76,12 +129,32 @@ function atualizarResumo() {
   const totalEnt = lista.filter(f => f.entrou).length;
   const totalAdultos = lista.filter(f => f.entrou).reduce((s, f) => s + f.adultos, 0);
   const totalCriancas = lista.filter(f => f.entrou).reduce((s, f) => s + f.criancas, 0);
+
   document.getElementById('resumo').innerHTML = `
-    <br><strong>Total famílias:</strong> ${totalFam} |
-    <strong>Entraram:</strong> ${totalEnt} |
+    <strong>Famílias:</strong> ${totalFam} |
+    <strong>Entraram:</strong> ${totalEnt} <br>
     <strong>Adultos:</strong> ${totalAdultos} |
     <strong>Crianças:</strong> ${totalCriancas}`;
 }
+
+function atualizarHistorico() {
+  const lista = document.getElementById('listaHistorico');
+  lista.innerHTML = '';
+  historico.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'entrada';
+    div.innerHTML = `<strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C 
+                     <span style="float:right;color:#666">${h.hora}</span>`;
+    lista.appendChild(div);
+  });
+}
+
+window.onload = function() {
+  const data = localStorage.getItem('familias');
+  if (data) familias = JSON.parse(data);
+  atualizarResumo();
+  atualizarHistorico();
+};
 </script>
 </body>
 </html>
