@@ -110,7 +110,7 @@ function processarQRCode(id, leitor) {
       criancas: f.criancas,
       hora
     });
-    if (historico.length > 100) historico.pop(); // limita tamanho
+    if (historico.length > 100) historico.pop();
     localStorage.setItem('familias', JSON.stringify(familias));
     localStorage.setItem('historico', JSON.stringify(historico));
     document.getElementById('resultado').innerHTML = `
@@ -126,13 +126,11 @@ function processarQRCode(id, leitor) {
 function atualizarResumo() {
   const lista = Object.values(familias);
   const totalFam = lista.length;
-  const totalEnt = lista.filter(f => f.entrou).length;
   const totalAdultos = lista.filter(f => f.entrou).reduce((s, f) => s + f.adultos, 0);
   const totalCriancas = lista.filter(f => f.entrou).reduce((s, f) => s + f.criancas, 0);
 
   document.getElementById('resumo').innerHTML = `
-    <strong>Famílias:</strong> ${totalFam} |
-    <strong>Entraram:</strong> ${totalEnt} <br>
+    <strong>Total de Famílias:</strong> ${totalFam} <br>
     <strong>Adultos:</strong> ${totalAdultos} |
     <strong>Crianças:</strong> ${totalCriancas}`;
 }
