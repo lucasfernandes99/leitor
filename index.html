@@ -76,9 +76,9 @@ function importar(evt) {
     }
 
     const data = JSON.parse(e.target.result);
-    familias = {};
-    data.forEach(f => familias[f.id] = f);
+    familias = data; // já está no formato correto
     localStorage.setItem('familias', JSON.stringify(familias));
+
 
     alert('✅ Nova lista de famílias carregada com sucesso!');
     atualizarResumo();
