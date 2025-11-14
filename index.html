@@ -3,247 +3,192 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Controle de Festa QR — Leitor Robust</title>
+<title>Controle de Festa QR — Leitor</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
+
 <style>
-  body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f5f5f5; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
-  h1 { text-align:center; font-size:1.3rem; margin:12px 0; }
-  #reader { width:90%; max-width:380px; margin:8px auto; }
-  .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:8px;}
-  button, input[type=file] { padding:10px 12px; border-radius:8px; border:none; background:#007bff; color:#fff; cursor:pointer; }
-  button.secondary{ background:#6c757d; }
-  #resultado { width:90%; background:#fff; padding:10px; border-radius:8px; text-align:center; margin-top:8px; }
-  #resumo { width:90%; background:#e9ecef; padding:10px; border-radius:8px; margin-top:8px; text-align:center;}
-  #historico { width:90%; background:#fff; padding:10px; border-radius:8px; margin-top:8px; max-height:260px; overflow:auto; }
-  .entrada{ border-bottom:1px solid #eee; padding:6px 0; }
+  body { font-family: Arial; margin:0; padding:0; background:#f5f5f5;
+         display:flex; flex-direction:column; align-items:center; min-height:100vh; }
+  h1 { text-align:center; font-size:1.4rem; margin:14px 0; }
+  #reader { width:90%; max-width:380px; margin-top:10px; }
+  button { padding:11px 18px; margin:6px; font-weight:bold;
+           border:none; border-radius:8px; background:#007bff; color:white; cursor:pointer; }
+  button.secondary { background:#6c757d; }
+  #resultado, #resumo { width:90%; background:#fff; padding:12px;
+                        border-radius:10px; text-align:center; margin-top:10px; }
+  #historico { width:90%; background:#fff; padding:10px; border-radius:10px;
+               margin-top:10px; max-height:260px; overflow:auto; }
+  .entrada { border-bottom:1px solid #ddd; padding:6px 0; }
+  #overlay {
+    position: fixed; top:0; left:0; width:100%; height:100%;
+    display:none; justify-content:center; align-items:center;
+    color:white; font-size:3rem; font-weight:bold;
+    z-index:9999; text-shadow:2px 2px 10px black;
+  }
 </style>
 </head>
 <body>
-  <h1>🎟️ Controle de Acesso — Leitor</h1>
 
-  <div class="controls">
-    <input id="importar" type="file" accept=".json">
-    <button id="btnCamera">📷 Iniciar Câmera</button>
-    <button id="btnParar">⏸️ Parar Câmera</button>
-  </div>
+<h1>🎟 Controle de Acesso</h1>
 
-  <div id="reader"></div>
+<button id="btnCamera">📷 Iniciar Câmera</button>
+<button id="btnParar" class="secondary">⏸️ Parar</button>
 
-  <div id="resultado">Resultado: —</div>
-  <div id="resumo"></div>
+<div id="reader"></div>
 
-  <div id="historico">
-    <h3 style="text-align:center;margin:6px 0;">Histórico de Entradas</h3>
-    <div id="listaHistorico"></div>
-  </div>
+<div id="resultado">Aguardando leitura...</div>
+<div id="resumo"></div>
+
+<div id="historico">
+  <h3 style="text-align:center;margin:6px 0;">Histórico</h3>
+  <div id="listaHistorico"></div>
+</div>
+
+<div id="overlay"></div>
 
 <script>
-/* ====== Estado ====== */
-let familias = {}; 
-let historico = JSON.parse(localStorage.getItem('historico') || '[]');
-let html5QrcodeScanner = null;
-let scannerPaused = false;
+const RESET_PASSWORD = "niverdamalu";
+const JSON_URL = "familias.json";
 
-/* ====== Utilidades ====== */
-function normalizeId(x){
-  return String(x || "").trim().toUpperCase();
-}
+let familias = {};
+let historico = JSON.parse(localStorage.getItem("historico") || "[]");
+let scanner = null;
+let paused = false;
 
-function tryExtractFamId(text){
-  if(!text) return null;
-
-  // se QR contém JSON com `id`
-  try {
-    const parsed = JSON.parse(text);
-    if(parsed && (parsed.id || parsed.ID)) 
-      return normalizeId(parsed.id || parsed.ID);
-  } catch(e){}
-
-  // regex FAMxxxxx
-  const m = text.match(/(FAM\w{3,})/i);
-  if(m) return normalizeId(m[1]);
-
-  return normalizeId(text);
-}
-
-/* ====== Importar lista ====== */
-document.getElementById('importar').addEventListener('change', function(evt){
-  const file = evt.target.files[0];
-  if(!file) return;
-
-  const reader = new FileReader();
-  reader.onload = e => {
-    const data = JSON.parse(e.target.result);
-
-    if(!confirm("Carregar nova lista irá apagar o histórico atual. Continuar?")) return;
-
-    historico = [];
-    localStorage.setItem('historico', '[]');
+async function carregarLista(){
+  try{
+    const res = await fetch(JSON_URL + "?v=" + Date.now());
+    const data = await res.json();
 
     familias = {};
+    Object.keys(data).forEach(k=>{
+      familias[k.toUpperCase()] = {...data[k], entrou:false};
+    });
 
-    if(Array.isArray(data)){
-      data.forEach(f=>{
-        const id = normalizeId(f.id);
-        familias[id] = {...f, id, entrou: !!f.entrou};
-      });
-    } else {
-      Object.keys(data).forEach(k=>{
-        const f = data[k];
-        const id = normalizeId(f.id || k);
-        familias[id] = {...f, id, entrou: !!f.entrou};
-      });
-    }
-
-    localStorage.setItem('familias', JSON.stringify(familias));
-
-    alert('Lista carregada!');
+    localStorage.setItem("familias", JSON.stringify(familias));
     atualizarResumo();
-    atualizarHistorico();
-  };
-
-  reader.readAsText(file);
-});
-
-/* ====== Câmera ====== */
-document.getElementById('btnCamera').onclick = iniciarCamera;
-document.getElementById('btnParar').onclick = pararCamera;
+  }catch(e){
+    console.warn("Erro ao carregar JSON:", e);
+  }
+}
 
 function iniciarCamera(){
-  if(html5QrcodeScanner) return;
-
-  html5QrcodeScanner = new Html5Qrcode("reader");
-
-  html5QrcodeScanner.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 250, height: 250 } },
-    onScanSuccess,
-    () => {}
-  )
-  .catch(err => {
-    alert("Erro ao iniciar câmera: " + err);
-    html5QrcodeScanner = null;
-  });
+  if(scanner) return;
+  scanner = new Html5Qrcode("reader");
+  scanner.start({ facingMode:"environment" }, { fps:10, qrbox:{width:250,height:250} }, onScan);
 }
 
 function pararCamera(){
-  if(!html5QrcodeScanner) return;
-
-  html5QrcodeScanner.stop()
-    .then(() => {
-      html5QrcodeScanner.clear();
-      html5QrcodeScanner = null;
-    });
+  if(!scanner) return;
+  scanner.stop().then(()=>{ scanner.clear(); scanner=null; });
 }
 
-/* ====== PROCESSAR QR ====== */
-let lastScan = null;
+function overlay(cor, texto){
+  const box=document.getElementById("overlay");
+  box.style.background=cor;
+  box.innerHTML=texto;
+  box.style.display="flex";
+  setTimeout(()=> box.style.display="none", 1000);
+}
 
-async function onScanSuccess(decodedText){
+function vibrar(padrao){
+  if(navigator.vibrate) navigator.vibrate(padrao);
+}
 
-  // evitar leituras repetidas rápidas
-  if(decodedText === lastScan) return;
-  lastScan = decodedText;
-  setTimeout(()=> lastScan = null, 1200);
+let ultima = null;
 
-  // pausar scanner (SEM parar câmera!)
-  if(html5QrcodeScanner && !scannerPaused){
-    html5QrcodeScanner.pause(true);
-    scannerPaused = true;
+function onScan(texto){
+  if(texto===ultima) return;
+  ultima=texto;
+  setTimeout(()=> ultima=null, 1200);
+
+  if(!paused){
+    scanner.pause(true);
+    paused=true;
   }
 
-  const id = tryExtractFamId(decodedText);
-
-  if(!id || !familias[id]){
-    vibrarErro();
-    alert("❌ QR inválido!");
-    retomarCamera();
-    return;
-  }
-
+  const id = texto.trim().toUpperCase();
   const fam = familias[id];
 
-  /* === Se já entrou === */
-  if(fam.entrou){
-    vibrarErro();
-    alert(`⚠️ ${fam.nome} já entrou anteriormente.`);
-    atualizarResumo();
-    atualizarHistorico();
-    retomarCamera();
-    return;
+  if(!fam){
+    vibrar([80,80,80]);
+    overlay("rgba(200,0,0,0.8)", "⛔ Inválido");
+    return retomar();
   }
 
-  /* === ENTRADA VÁLIDA === */
-  vibrarOK();
+  if(fam.entrou){
+    vibrar([60,60,60]);
+    overlay("rgba(230,140,0,0.85)", "⚠ Já Registrado");
+    return retomar();
+  }
 
-  fam.entrou = true;
+  vibrar([100]);
+  overlay("rgba(0,150,0,0.8)", "✔ Liberado");
 
-  const hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-  historico.unshift({
-      nome: fam.nome,
-      adultos: fam.adultos,
-      criancas: fam.criancas,
-      hora
-  });
+  fam.entrou=true;
+  const hora=new Date().toLocaleTimeString("pt-BR",{hour:'2-digit',minute:'2-digit'});
+  historico.unshift({...fam,hora});
+  localStorage.setItem("familias",JSON.stringify(familias));
+  localStorage.setItem("historico",JSON.stringify(historico));
 
-  localStorage.setItem('familias', JSON.stringify(familias));
-  localStorage.setItem('historico', JSON.stringify(historico));
-
-  document.getElementById('resultado').innerHTML =
-    `✅ <strong>${fam.nome}</strong><br>${fam.adultos} adultos • ${fam.criancas} crianças<br><em>${hora}</em>`;
+  document.getElementById("resultado").innerHTML=
+  `✔ <strong>${fam.nome}</strong><br>${fam.adultos} adultos • ${fam.criancas} crianças<br><em>${hora}</em>`;
 
   atualizarResumo();
   atualizarHistorico();
-  retomarCamera();
+  retomar();
 }
 
-/* ====== Vibração ====== */
-function vibrarOK(){
-  if(navigator.vibrate) navigator.vibrate([100]);
-}
-
-function vibrarErro(){
-  if(navigator.vibrate) navigator.vibrate([60,60,60]);
-}
-
-/* ====== Retomar leitura SEM travar ====== */
-function retomarCamera(){
+function retomar(){
   setTimeout(()=>{
-    if(html5QrcodeScanner){
-      html5QrcodeScanner.resume();
-      scannerPaused = false;
+    if(scanner){
+      scanner.resume();
+      paused=false;
     }
-  }, 900);
+  },900);
 }
 
-/* ====== UI ====== */
 function atualizarResumo(){
-  const list = Object.values(familias);
-  const totalAdultos = list.filter(f=>f.entrou).reduce((s,f)=>s+Number(f.adultos),0);
-  const totalCriancas = list.filter(f=>f.entrou).reduce((s,f)=>s+Number(f.criancas),0);
-  document.getElementById('resumo').innerHTML =
-    `<strong>Adultos:</strong> ${totalAdultos} • <strong>Crianças:</strong> ${totalCriancas}`;
+  const todos=Object.values(familias);
+  const adultos=todos.filter(f=>f.entrou).reduce((a,b)=>a+b.adultos,0);
+  const criancas=todos.filter(f=>f.entrou).reduce((a,b)=>a+b.criancas,0);
+
+  document.getElementById("resumo").innerHTML=
+    `👤 Adultos: <b>${adultos}</b> • 🧒 Crianças: <b>${criancas}</b>`;
 }
 
 function atualizarHistorico(){
-  const box = document.getElementById('listaHistorico');
-  box.innerHTML = "";
+  const box=document.getElementById("listaHistorico");
+  box.innerHTML="";
   historico.forEach(h=>{
-    const div = document.createElement("div");
-    div.className = "entrada";
-    div.innerHTML = `<strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C <span style="float:right">${h.hora}</span>`;
-    box.appendChild(div);
+    box.innerHTML+=`<div class="entrada"><strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C <span style="float:right">${h.hora}</span></div>`;
   });
 }
 
-/* ====== Load inicial ====== */
-window.onload = ()=>{
-  const data = localStorage.getItem('familias');
-  if(data) familias = JSON.parse(data);
+const btnReset=document.createElement("button");
+btnReset.innerText="🧹 Resetar Entradas";
+btnReset.style.marginTop="10px";
+btnReset.onclick=()=>{
+  const senha=prompt("Senha para reset:");
+  if(senha!==RESET_PASSWORD) return alert("❌ Senha incorreta!");
+
+  Object.values(familias).forEach(f=>f.entrou=false);
+  historico=[];
+  localStorage.setItem("familias",JSON.stringify(familias));
+  localStorage.setItem("historico","[]");
+  atualizarHistorico();
+  atualizarResumo();
+  alert("✔ Reset concluído");
+};
+document.body.appendChild(btnReset);
+
+window.onload=()=>{
+  const salvo=localStorage.getItem("familias");
+  if(salvo){ familias=JSON.parse(salvo); }
+  else { carregarLista(); }
   atualizarResumo();
   atualizarHistorico();
 };
 </script>
-
 </body>
 </html>
