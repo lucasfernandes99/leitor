@@ -56,16 +56,18 @@ let scanner = null;
 let paused = false;
 
 async function carregarLista(){
-  try{
+  try {
     const res = await fetch(JSON_URL + "?v=" + Date.now());
     const data = await res.json();
+
     familias = {};
     Object.keys(data).forEach(k=>{
       familias[k.toUpperCase()] = {...data[k], entrou:false};
     });
+
     localStorage.setItem("familias", JSON.stringify(familias));
     atualizarResumo();
-  }catch(e){
+  } catch(e){
     console.warn("Erro ao carregar JSON:", e);
   }
 }
@@ -89,10 +91,10 @@ function pararCamera(){
 }
 
 function overlay(cor, texto){
-  const box=document.getElementById("overlay");
-  box.style.background=cor;
-  box.innerHTML=texto;
-  box.style.display="flex";
+  const box = document.getElementById("overlay");
+  box.style.background = cor;
+  box.innerHTML = texto;
+  box.style.display = "flex";
   setTimeout(()=> box.style.display="none", 1000);
 }
 
@@ -103,7 +105,7 @@ function vibrar(padrao){
 let ultima = null;
 
 function onScan(texto){
-  if(texto===ultima) return;
+  if(texto === ultima) return;
   ultima = texto;
   setTimeout(()=> ultima=null, 1200);
 
@@ -134,8 +136,8 @@ function onScan(texto){
   const hora = new Date().toLocaleTimeString("pt-BR",{hour:'2-digit',minute:'2-digit'});
 
   historico.unshift({...fam,hora});
-  localStorage.setItem("familias",JSON.stringify(familias));
-  localStorage.setItem("historico",JSON.stringify(historico));
+  localStorage.setItem("familias", JSON.stringify(familias));
+  localStorage.setItem("historico", JSON.stringify(historico));
 
   document.getElementById("resultado").innerHTML =
   `✔ <strong>${fam.nome}</strong><br>${fam.adultos} adultos • ${fam.criancas} crianças<br><em>${hora}</em>`;
@@ -151,7 +153,7 @@ function retomar(){
       scanner.resume();
       paused = false;
     }
-  },900);
+  }, 900);
 }
 
 function atualizarResumo(){
@@ -159,7 +161,7 @@ function atualizarResumo(){
   const adultos = todos.filter(f=>f.entrou).reduce((a,b)=>a+b.adultos,0);
   const criancas = todos.filter(f=>f.entrou).reduce((a,b)=>a+b.criancas,0);
 
-  document.getElementById("resumo").innerHTML=
+  document.getElementById("resumo").innerHTML =
     `👤 Adultos: <b>${adultos}</b> • 🧒 Crianças: <b>${criancas}</b>`;
 }
 
@@ -171,19 +173,26 @@ function atualizarHistorico(){
   });
 }
 
-const btnReset=document.createElement("button");
+const btnReset = document.createElement("button");
 btnReset.innerText="🧹 Resetar Entradas";
 btnReset.style.marginTop="10px";
 btnReset.onclick=()=>{
-  const senha=prompt("Senha para reset:");
-  if(senha!==RESET_PASSWORD) return alert("❌ Senha incorreta!");
-  Object.values(familias).forEach(f=>f.entrou = false);
-  historico=[];
-  localStorage.setItem("familias",JSON.stringify(familias));
-  localStorage.setItem("historico","[]");
-  atualizarRepositorio();
+  const senha = prompt("Senha para reset:");
+
+  if(senha !== RESET_PASSWORD){
+    alert("❌ Senha incorreta!");
+    return;
+  }
+
+  Object.values(familias).forEach(f=>f.entrou=false);
+  historico = [];
+
+  localStorage.setItem("familias", JSON.stringify(familias));
+  localStorage.setItem("historico", "[]");
+
+  atualizarResumo();
   atualizarHistorico();
-  alert("✔ Reset concluído");
+  alert("✔ Reset concluído com sucesso!");
 };
 document.body.appendChild(btnReset);
 
@@ -191,8 +200,9 @@ window.onload=()=>{
   document.getElementById("btnCamera").onclick = iniciarCamera;
   document.getElementById("btnParar").onclick = pararCamera;
 
-  const salvo=localStorage.getItem("familias");
-  if(salvo){ familias=JSON.parse(salvo); } else { carregarLista(); }
+  const salvo = localStorage.getItem("familias");
+  if(salvo){ familias=JSON.parse(salvo); } 
+  else { carregarLista(); }
 
   atualizarResumo();
   atualizarHistorico();
