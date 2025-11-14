@@ -55,6 +55,7 @@ let historico = JSON.parse(localStorage.getItem("historico") || "[]");
 let scanner = null;
 let paused = false;
 
+// ===== CARREGAR LISTA JSON =====
 async function carregarLista(){
   try {
     const res = await fetch(JSON_URL + "?v=" + Date.now());
@@ -72,6 +73,7 @@ async function carregarLista(){
   }
 }
 
+// ===== CÂMERA =====
 function iniciarCamera(){
   if(scanner) return;
   scanner = new Html5Qrcode("reader");
@@ -90,6 +92,7 @@ function pararCamera(){
   });
 }
 
+// ===== OVERLAY & VIBRAÇÃO =====
 function overlay(cor, texto){
   const box = document.getElementById("overlay");
   box.style.background = cor;
@@ -104,6 +107,7 @@ function vibrar(padrao){
 
 let ultima = null;
 
+// ===== PROCESSAR QR =====
 function onScan(texto){
   if(texto === ultima) return;
   ultima = texto;
@@ -125,11 +129,11 @@ function onScan(texto){
 
   if(fam.entrou){
     vibrar([60,60,60]);
-    overlay("rgba(230,140,0,0.85)", "⚠ Já Registrado");
+    overlay("rgba(230,160,0,0.8)", "⚠ Já Registrado");
     return retomar();
   }
 
-  vibrar([100]);
+  vibrar([120]);
   overlay("rgba(0,150,0,0.8)", "✔ Liberado");
 
   fam.entrou = true;
@@ -156,6 +160,7 @@ function retomar(){
   }, 900);
 }
 
+// ===== UI =====
 function atualizarResumo(){
   const todos = Object.values(familias);
   const adultos = todos.filter(f=>f.entrou).reduce((a,b)=>a+b.adultos,0);
@@ -173,12 +178,12 @@ function atualizarHistorico(){
   });
 }
 
+// ===== BOTÃO RESET =====
 const btnReset = document.createElement("button");
 btnReset.innerText="🧹 Resetar Entradas";
 btnReset.style.marginTop="10px";
 btnReset.onclick=()=>{
   const senha = prompt("Senha para reset:");
-
   if(senha !== RESET_PASSWORD){
     alert("❌ Senha incorreta!");
     return;
@@ -192,10 +197,19 @@ btnReset.onclick=()=>{
 
   atualizarResumo();
   atualizarHistorico();
+
   alert("✔ Reset concluído com sucesso!");
+
+  // 🔧 Reiniciar a câmera após reset
+  setTimeout(()=>{
+    pararCamera();
+    iniciarCamera();
+    paused = false;
+  }, 300);
 };
 document.body.appendChild(btnReset);
 
+// ===== INICIALIZAÇÃO =====
 window.onload=()=>{
   document.getElementById("btnCamera").onclick = iniciarCamera;
   document.getElementById("btnParar").onclick = pararCamera;
