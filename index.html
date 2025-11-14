@@ -3,165 +3,279 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Controle de Festa QR</title>
+<title>Controle de Festa QR — Leitor Robust</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    margin: 0; padding: 0;
-    background: #f5f5f5;
-    display: flex; flex-direction: column;
-    align-items: center; min-height: 100vh;
-  }
-  h1 { text-align: center; font-size: 1.4rem; margin-top: 10px; }
-  #reader { width: 90%; max-width: 350px; margin: 10px auto; }
-  button, input[type=file] {
-    padding: 10px 14px; margin: 5px;
-    border: none; border-radius: 6px;
-    background: #007bff; color: white;
-    font-size: 1rem; cursor: pointer;
-  }
-  button:hover { background: #0056b3; }
-  #resultado {
-    margin: 10px auto; width: 90%;
-    background: #fff; padding: 10px;
-    border-radius: 10px; text-align: center;
-    font-size: 1.1rem;
-  }
-  #resumo {
-    background: #e9ecef; width: 90%;
-    padding: 10px; border-radius: 10px;
-    text-align: center; margin-top: 10px;
-  }
-  #historico {
-    width: 90%; background: #fff; margin-top: 10px;
-    padding: 10px; border-radius: 10px;
-    max-height: 250px; overflow-y: auto;
-    font-size: 0.95rem;
-  }
-  #historico h3 { margin: 5px 0; text-align: center; }
-  .entrada { border-bottom: 1px solid #ccc; padding: 5px 0; }
-  .entrada:last-child { border-bottom: none; }
+  body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f5f5f5; display:flex; flex-direction:column; align-items:center; min-height:100vh; }
+  h1 { text-align:center; font-size:1.3rem; margin:12px 0; }
+  #reader { width:90%; max-width:380px; margin:8px auto; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:8px;}
+  button, input[type=file] { padding:10px 12px; border-radius:8px; border:none; background:#007bff; color:#fff; cursor:pointer; }
+  button.secondary{ background:#6c757d; }
+  #resultado { width:90%; background:#fff; padding:10px; border-radius:8px; text-align:center; margin-top:8px; }
+  #resumo { width:90%; background:#e9ecef; padding:10px; border-radius:8px; margin-top:8px; text-align:center;}
+  #historico { width:90%; background:#fff; padding:10px; border-radius:8px; margin-top:8px; max-height:260px; overflow:auto; }
+  .entrada{ border-bottom:1px solid #eee; padding:6px 0; }
 </style>
 </head>
 <body>
-<h1>🎟️ Controle de Acesso</h1>
+  <h1>🎟️ Controle de Acesso — Leitor</h1>
 
-<input type="file" id="importar" accept=".json">
-<button onclick="iniciarCamera()">📷 Iniciar Câmera</button>
+  <div class="controls">
+    <input id="importar" type="file" accept=".json">
+    <button id="btnCamera">📷 Iniciar Câmera</button>
+    <button id="btnParar">⏸️ Parar Câmera</button>
+  </div>
 
-<div id="reader"></div>
-<div id="resultado"></div>
-<div id="resumo"></div>
-<div id="historico">
-  <h3>Histórico de Entradas</h3>
-  <div id="listaHistorico"></div>
-</div>
+  <div id="reader"></div>
+
+  <div id="resultado">Resultado: —</div>
+  <div id="resumo"></div>
+
+  <div id="historico">
+    <h3 style="text-align:center;margin:6px 0;">Histórico de Entradas</h3>
+    <div id="listaHistorico"></div>
+  </div>
 
 <script>
-let familias = {};
-let historico = JSON.parse(localStorage.getItem('historico')) || [];
+/* ====== Estado ====== */
+let familias = {}; // mapa: ID -> objeto { id, nome, adultos, criancas, entrou? }
+let historico = JSON.parse(localStorage.getItem('historico') || '[]');
+let html5QrcodeScanner = null;
 
-document.getElementById('importar').addEventListener('change', importar);
+/* ====== Utilidades ====== */
+function normalizeId(x){
+  if(!x) return '';
+  return String(x).trim().toUpperCase();
+}
+function tryExtractFamId(text){
+  if(!text) return null;
+  // se o QR contém JSON com campo id
+  try {
+    const parsed = JSON.parse(text);
+    if(parsed && (parsed.id || parsed.ID)) return normalizeId(parsed.id || parsed.ID);
+  } catch(e){
+    // não é JSON
+  }
+  // procurar padrão FAMxxxx
+  const m = text.match(/(FAM\w{3,})/i);
+  if(m) return normalizeId(m[1]);
+  // se só tiver algo parecido com letras+digitos, retorna trimmed upper
+  const s = text.trim();
+  if(s.length>0 && s.length < 100) return normalizeId(s);
+  return null;
+}
 
-function importar(evt) {
+/* ====== Importar lista (aceita array ou mapa) ====== */
+document.getElementById('importar').addEventListener('change', function(evt){
   const file = evt.target.files[0];
-  if (!file) return;
+  if(!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    // Zera o histórico ao carregar nova lista
-    if (confirm('Carregar nova lista irá apagar o histórico atual. Deseja continuar?')) {
-      historico = [];
-      localStorage.removeItem('historico');
+    let data;
+    try {
+      data = JSON.parse(e.target.result);
+    } catch(err){
+      alert('Arquivo JSON inválido!');
+      console.error('JSON parse error', err);
+      return;
     }
 
-    const data = JSON.parse(e.target.result);
-    familias = data; // já está no formato correto
+    // confirmação para apagar histórico
+    if(!confirm('Carregar nova lista irá apagar o histórico atual. Deseja continuar?')) return;
+
+    // reset histórico e salvar
+    historico = [];
+    localStorage.setItem('historico', JSON.stringify(historico));
+
+    // aceitar dois formatos:
+    // 1) mapa { "FAM123": {...}, ... }
+    // 2) array [ {id:..., nome:...}, ... ]
+    familias = {};
+    if(Array.isArray(data)){
+      data.forEach(f=>{
+        const id = normalizeId(f.id || f.ID || f.nome); // se id ausente usar nome (fallback)
+        if(!id) return;
+        familias[id] = { id, nome: f.nome || f.Nome || '', adultos: Number(f.adultos||f.Adults||0)||0, criancas: Number(f.criancas||f.Crianças||f.children||0)||0, entrou: !!f.entrou };
+      });
+    } else if(typeof data === 'object' && data !== null){
+      // mapa -> copiar e normalizar chaves
+      Object.keys(data).forEach(k=>{
+        const f = data[k];
+        const id = normalizeId(f.id || k);
+        familias[id] = { id, nome: f.nome || f.Nome || '', adultos: Number(f.adultos||0)||0, criancas: Number(f.criancas||0)||0, entrou: !!f.entrou };
+      });
+    } else {
+      alert('Formato de JSON não reconhecido. Use mapa ou lista.');
+      return;
+    }
+
+    // salvar no localStorage (key 'familias')
     localStorage.setItem('familias', JSON.stringify(familias));
-
-
-    alert('✅ Nova lista de famílias carregada com sucesso!');
+    alert('✅ Lista carregada: ' + Object.keys(familias).length + ' famílias.');
     atualizarResumo();
     atualizarHistorico();
+    console.log('familias (carregadas):', familias);
   };
   reader.readAsText(file);
-}
+});
 
-function iniciarCamera() {
-  const leitor = new Html5Qrcode("reader");
-  leitor.start(
+/* ====== Câmera ====== */
+document.getElementById('btnCamera').addEventListener('click', iniciarCamera);
+document.getElementById('btnParar').addEventListener('click', pararCamera);
+
+function iniciarCamera(){
+  if(html5QrcodeScanner) return; // já rodando
+  const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+  html5QrcodeScanner = new Html5Qrcode("reader");
+  html5QrcodeScanner.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 250, height: 250 } },
-    (id) => processarQRCode(id, leitor),
-    () => {}
-  );
-}
-
-function processarQRCode(id, leitor) {
-  leitor.stop();
-
-  if (!familias[id]) {
-    alert('❌ QR Code inválido!');
-    setTimeout(iniciarCamera, 1000);
-    return;
-  }
-
-  const f = familias[id];
-
-  if (f.entrou) {
-    alert(`⚠️ ${f.nome} já entrou anteriormente!`);
-  } else {
-    f.entrou = true;
-    const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    historico.unshift({
-      nome: f.nome,
-      adultos: f.adultos,
-      criancas: f.criancas,
-      hora
-    });
-    if (historico.length > 200) historico.pop();
-    localStorage.setItem('familias', JSON.stringify(familias));
-    localStorage.setItem('historico', JSON.stringify(historico));
-    document.getElementById('resultado').innerHTML = `
-      ✅ <strong>${f.nome}</strong><br>
-      ${f.adultos} adultos e ${f.criancas} crianças<br>
-      <em>Entrada registrada às ${hora}</em>`;
-    atualizarResumo();
-    atualizarHistorico();
-  }
-  setTimeout(iniciarCamera, 1500);
-}
-
-function atualizarResumo() {
-  const lista = Object.values(familias);
-  const totalFam = lista.length;
-  const totalAdultos = lista.filter(f => f.entrou).reduce((s, f) => s + f.adultos, 0);
-  const totalCriancas = lista.filter(f => f.entrou).reduce((s, f) => s + f.criancas, 0);
-
-  document.getElementById('resumo').innerHTML = `
-    <strong>Total de Famílias:</strong> ${totalFam} <br>
-    <strong>Adultos:</strong> ${totalAdultos} |
-    <strong>Crianças:</strong> ${totalCriancas}`;
-}
-
-function atualizarHistorico() {
-  const lista = document.getElementById('listaHistorico');
-  lista.innerHTML = '';
-  historico.forEach(h => {
-    const div = document.createElement('div');
-    div.className = 'entrada';
-    div.innerHTML = `<strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C 
-                     <span style="float:right;color:#666">${h.hora}</span>`;
-    lista.appendChild(div);
+    config,
+    decodedText => { onScanSuccess(decodedText); }, 
+    error => { /* ignore scan errors */ }
+  ).catch(err=>{
+    console.error('Erro ao iniciar camera:', err);
+    alert('Não foi possível iniciar câmera: ' + err);
+    html5QrcodeScanner = null;
   });
 }
 
-window.onload = function() {
-  const data = localStorage.getItem('familias');
-  if (data) familias = JSON.parse(data);
+function pararCamera(){
+  if(!html5QrcodeScanner) return;
+  html5QrcodeScanner.stop().then(()=> {
+    html5QrcodeScanner.clear(); html5QrcodeScanner = null;
+    console.log('Câmera parada');
+  }).catch(err=>{ console.warn('Erro ao parar camera', err); html5QrcodeScanner = null; });
+}
+
+/* ====== Processamento do QR ====== */
+let lastScanned = null;
+async function onScanSuccess(decodedText){
+  console.log('Scan recebido:', decodedText);
+  // evitar duplicatas rápidas
+  if(decodedText === lastScanned) return;
+  lastScanned = decodedText;
+  setTimeout(()=> lastScanned = null, 1500);
+
+  // extrair id possível
+  const extracted = tryExtractFamId(decodedText);
+  console.log('ID extraído:', extracted);
+
+  if(!extracted){
+    alert('❌ QR Code inválido (não reconhecido).');
+    return;
+  }
+
+  // tentar localizar no mapa (caso-insensitivo usando NORMALIZE)
+  const id = normalizeId(extracted);
+  if(!familias || Object.keys(familias).length === 0){
+    // talvez temos familias na localStorage com outra chave
+    const stored = localStorage.getItem('familias');
+    if(stored){
+      try { familias = JSON.parse(stored); console.log('familias carregadas do localStorage'); } catch(e){ console.warn('falha ao parse familias do localStorage', e); }
+    }
+  }
+
+  // procurar correspondência direta (as chaves já são normalizadas)
+  let fam = familias[id] || null;
+
+  // tentar alternativas: se keys em mapa não estão em uppercase
+  if(!fam){
+    // buscar case-insensitive
+    const keys = Object.keys(familias);
+    for(const k of keys){
+      if(normalizeId(k) === id){ fam = familias[k]; break; }
+    }
+  }
+
+  if(!fam){
+    // se ainda não achou, tenta buscar por nome (caso QR traga apenas nome)
+    for(const k of Object.keys(familias)){
+      const f = familias[k];
+      if(f && (normalizeId(f.nome) === id || normalizeId(f.nome).includes(id))) { fam = f; break; }
+    }
+  }
+
+  if(!fam){
+    console.warn('Não encontrou família para id:', id, 'map keys:', Object.keys(familias).slice(0,10));
+    alert('❌ QR Code inválido (não encontrado na lista).');
+    return;
+  }
+
+  // temos família válida
+  if(fam.entrou){
+    alert(`⚠️ ${fam.nome} já entrou anteriormente.`);
+    atualizarResumo(); atualizarHistorico();
+    return;
+  }
+
+  // marca entrada
+  fam.entrou = true;
+  const now = new Date();
+  const hora = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  historico.unshift({ nome: fam.nome, adultos: fam.adultos||0, criancas: fam.criancas||0, hora });
+  if(historico.length > 500) historico.pop();
+
+  // salvar estado
+  localStorage.setItem('familias', JSON.stringify(familias));
+  localStorage.setItem('historico', JSON.stringify(historico));
+
+  // mostrar resultado
+  document.getElementById('resultado').innerHTML = `✅ <strong>${fam.nome}</strong><br>${fam.adultos || 0} adultos • ${fam.criancas || 0} crianças<br><em>Entrada às ${hora}</em>`;
   atualizarResumo();
   atualizarHistorico();
-};
+
+  // restart camera after a short delay
+  setTimeout(()=>{ if(html5QrcodeScanner) html5QrcodeScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, decodedText => onScanSuccess(decodedText)); }, 1000);
+}
+
+/* ====== UI helpers ====== */
+function atualizarResumo(){
+  const lista = Object.values(familias || {});
+  const totalFam = lista.length;
+  const totalAdultos = lista.filter(f => f.entrou).reduce((s,f)=> s + (Number(f.adultos)||0), 0);
+  const totalCriancas = lista.filter(f => f.entrou).reduce((s,f)=> s + (Number(f.criancas)||0), 0);
+  document.getElementById('resumo').innerHTML = `<strong>Famílias:</strong> ${totalFam} &nbsp; • &nbsp; <strong>Adultos:</strong> ${totalAdultos} &nbsp; • &nbsp; <strong>Crianças:</strong> ${totalCriancas}`;
+}
+
+function atualizarHistorico(){
+  const list = document.getElementById('listaHistorico');
+  list.innerHTML = '';
+  historico.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'entrada';
+    div.innerHTML = `<strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C <span style="float:right;color:#666">${h.hora}</span>`;
+    list.appendChild(div);
+  });
+}
+
+/* ====== Carregar estado ao abrir ====== */
+window.addEventListener('load', ()=>{
+  try {
+    const stored = localStorage.getItem('familias');
+    if(stored) {
+      familias = JSON.parse(stored);
+      // normalize keys: rebuild map with uppercase keys (defensive)
+      const normalized = {};
+      Object.keys(familias).forEach(k=>{
+        const f = familias[k];
+        const id = normalizeId(f.id || k);
+        normalized[id] = { id, nome: f.nome||'', adultos: Number(f.adultos||0)||0, criancas: Number(f.criancas||0)||0, entrou: !!f.entrou };
+      });
+      familias = normalized;
+    }
+  } catch(e){
+    console.warn('Erro ao carregar familias do localStorage', e);
+  }
+
+  try {
+    historico = JSON.parse(localStorage.getItem('historico') || '[]');
+  } catch(e){ historico = []; }
+
+  atualizarResumo();
+  atualizarHistorico();
+});
 </script>
 </body>
 </html>
