@@ -1,193 +1,170 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Controle de Festa QR — Leitor</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Controle de Acesso 🎟</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 
 <style>
-  body { font-family: Arial; margin:0; padding:0; background:#f5f5f5;
-         display:flex; flex-direction:column; align-items:center; min-height:100vh; }
-  h1 { text-align:center; font-size:1.4rem; margin:14px 0; }
-  #reader { width:90%; max-width:380px; margin-top:10px; }
-  button { padding:11px 18px; margin:6px; font-weight:bold;
-           border:none; border-radius:8px; background:#007bff; color:white; cursor:pointer; }
-  button.secondary { background:#6c757d; }
-  #resultado, #resumo { width:90%; background:#fff; padding:12px;
-                        border-radius:10px; text-align:center; margin-top:10px; }
-  #historico { width:90%; background:#fff; padding:10px; border-radius:10px;
-               margin-top:10px; max-height:260px; overflow:auto; }
-  .entrada { border-bottom:1px solid #ddd; padding:6px 0; }
-  #overlay {
-    position: fixed; top:0; left:0; width:100%; height:100%;
-    display:none; justify-content:center; align-items:center;
-    color:white; font-size:3rem; font-weight:bold;
-    z-index:9999; text-shadow:2px 2px 10px black;
+  body{
+    margin:0;
+    font-family:Arial, sans-serif;
+    background:#f2f2f2;
+    text-align:center;
+  }
+  h1{margin:18px 0;font-size:1.5rem;}
+
+  #reader{
+    width:90%;
+    max-width:350px;
+    margin:10px auto;
+  }
+
+  button{
+    background:#007bff;
+    color:white;
+    border:0;
+    padding:12px 18px;
+    margin:6px;
+    border-radius:10px;
+    font-size:1rem;
+    cursor:pointer;
+  }
+  button.stop{ background:#6c757d; }
+
+  #resultado{
+    width:90%;
+    max-width:500px;
+    margin:10px auto;
+    padding:12px;
+    border-radius:12px;
+    background:white;
+    font-size:1.1rem;
+  }
+
+  #resumo, #historico{
+    width:90%;
+    max-width:500px;
+    margin:10px auto;
+    padding:12px;
+    border-radius:12px;
+    background:white;
+  }
+
+  .entrada{
+    border-bottom:1px solid #ddd;
+    padding:6px 4px;
+    font-size:0.95rem;
+  }
+
+  #overlay{
+    position:fixed;
+    top:0;left:0;
+    width:100vw;height:100vh;
+    background:transparent;
+    pointer-events:none;
+    transition:0.3s;
+    opacity:0;
   }
 </style>
 </head>
 <body>
 
+<div id="overlay"></div>
+
 <h1>🎟 Controle de Acesso</h1>
 
-<button id="btnCamera">📷 Iniciar Câmera</button>
-<button id="btnParar" class="secondary">⏸️ Parar</button>
+<button id="btnStart">📷 Iniciar Câmera</button>
+<button id="btnStop" class="stop">⏸ Parar</button>
 
 <div id="reader"></div>
 
 <div id="resultado">Aguardando leitura...</div>
+
 <div id="resumo"></div>
 
 <div id="historico">
-  <h3 style="text-align:center;margin:6px 0;">Histórico</h3>
+  <h3>Histórico</h3>
   <div id="listaHistorico"></div>
 </div>
 
-<div id="overlay"></div>
+
+<button id="btnReset" style="background:#ff4444">🧹 Resetar Entradas</button>
 
 <script>
+/* ===== CONFIG ===== */
 const RESET_PASSWORD = "niverdamalu";
-const JSON_URL = "familias.json";
-
-let familias = {};
-let historico = JSON.parse(localStorage.getItem("historico") || "[]");
 let scanner = null;
 let paused = false;
 
-// ===== CARREGAR LISTA JSON =====
-async function carregarLista(){
-  try {
-    const res = await fetch(JSON_URL + "?v=" + Date.now());
-    const data = await res.json();
+/* ===== DADOS ===== */
+let familias = JSON.parse(localStorage.getItem("familias") || "{}");
+let historico = JSON.parse(localStorage.getItem("historico") || "[]");
 
-    familias = {};
-    Object.keys(data).forEach(k=>{
-      familias[k.toUpperCase()] = {...data[k], entrou:false};
-    });
+/* ===== Funções UI ===== */
 
-    localStorage.setItem("familias", JSON.stringify(familias));
-    atualizarResumo();
-  } catch(e){
-    console.warn("Erro ao carregar JSON:", e);
-  }
+function vibra(tipo){
+  if(!navigator.vibrate) return;
+
+  if(tipo==="ok") navigator.vibrate([30,50,30]);
+  else if(tipo==="erro") navigator.vibrate([80,50,80]);
 }
 
-// ===== CÂMERA =====
-function iniciarCamera(){
-  if(scanner) return;
-  scanner = new Html5Qrcode("reader");
-  scanner.start(
-    { facingMode:"environment" },
-    { fps:10, qrbox:{width:250,height:250} },
-    onScan
-  );
+function mostrarOverlay(cor){
+  const o = document.getElementById("overlay");
+  o.style.background = cor;
+  o.style.opacity = 0.6;
+  setTimeout(()=>{ o.style.opacity=0; },400);
 }
 
-function pararCamera(){
-  if(!scanner) return;
-  scanner.stop().then(()=>{
-    scanner.clear();
-    scanner=null;
-  });
-}
 
-// ===== OVERLAY & VIBRAÇÃO =====
-function overlay(cor, texto){
-  const box = document.getElementById("overlay");
-  box.style.background = cor;
-  box.innerHTML = texto;
-  box.style.display = "flex";
-  setTimeout(()=> box.style.display="none", 1000);
-}
+/* ===== Atualização UI ===== */
 
-function vibrar(padrao){
-  if(navigator.vibrate) navigator.vibrate(padrao);
-}
-
-let ultima = null;
-
-// ===== PROCESSAR QR =====
-function onScan(texto){
-  if(texto === ultima) return;
-  ultima = texto;
-  setTimeout(()=> ultima=null, 1200);
-
-  if(!paused){
-    scanner.pause(true);
-    paused = true;
-  }
-
-  const id = texto.trim().toUpperCase();
-  const fam = familias[id];
-
-  if(!fam){
-    vibrar([80,80,80]);
-    overlay("rgba(200,0,0,0.8)", "⛔ Inválido");
-    return retomar();
-  }
-
-  if(fam.entrou){
-    vibrar([60,60,60]);
-    overlay("rgba(230,160,0,0.8)", "⚠ Já Registrado");
-    return retomar();
-  }
-
-  vibrar([120]);
-  overlay("rgba(0,150,0,0.8)", "✔ Liberado");
-
-  fam.entrou = true;
-  const hora = new Date().toLocaleTimeString("pt-BR",{hour:'2-digit',minute:'2-digit'});
-
-  historico.unshift({...fam,hora});
-  localStorage.setItem("familias", JSON.stringify(familias));
-  localStorage.setItem("historico", JSON.stringify(historico));
-
-  document.getElementById("resultado").innerHTML =
-  `✔ <strong>${fam.nome}</strong><br>${fam.adultos} adultos • ${fam.criancas} crianças<br><em>${hora}</em>`;
-
-  atualizarResumo();
-  atualizarHistorico();
-  retomar();
-}
-
-function retomar(){
-  setTimeout(()=>{
-    if(scanner){
-      scanner.resume();
-      paused = false;
-    }
-  }, 900);
-}
-
-// ===== UI =====
 function atualizarResumo(){
-  const todos = Object.values(familias);
-  const adultos = todos.filter(f=>f.entrou).reduce((a,b)=>a+b.adultos,0);
-  const criancas = todos.filter(f=>f.entrou).reduce((a,b)=>a+b.criancas,0);
+  const lista = Object.values(familias);
+  const totalFam = lista.length;
+  const adultos = lista.filter(f=>f.entrou).reduce((s,f)=>s+(f.adultos||0),0);
+  const criancas = lista.filter(f=>f.entrou).reduce((s,f)=>s+(f.criancas||0),0);
 
-  document.getElementById("resumo").innerHTML =
-    `👤 Adultos: <b>${adultos}</b> • 🧒 Crianças: <b>${criancas}</b>`;
+  document.getElementById("resumo").innerHTML = `
+    👨‍👩‍👧 Famílias: <b>${totalFam}</b> <br>
+    🧑 Adultos: <b>${adultos}</b> • 👧 Crianças: <b>${criancas}</b>
+  `;
 }
 
 function atualizarHistorico(){
-  const box=document.getElementById("listaHistorico");
-  box.innerHTML="";
+  const div = document.getElementById("listaHistorico");
+  div.innerHTML = "";
+
   historico.forEach(h=>{
-    box.innerHTML+=`<div class="entrada"><strong>${h.nome}</strong> — ${h.adultos}A / ${h.criancas}C <span style="float:right">${h.hora}</span></div>`;
+    const el = document.createElement("div");
+    el.className="entrada";
+    el.innerHTML = `<b>${h.nome}</b> — ${h.adultos}A / ${h.criancas}C <span style="float:right">${h.hora}</span>`;
+    div.appendChild(el);
   });
 }
 
-// ===== BOTÃO RESET =====
-const btnReset = document.createElement("button");
-btnReset.innerText="🧹 Resetar Entradas";
-btnReset.style.marginTop="10px";
-btnReset.onclick=()=>{
-  const senha = prompt("Senha para reset:");
+/* ===== Reset ===== */
+document.getElementById("btnReset").onclick = ()=>{
+  const senha = prompt("Digite a senha para reset:");
+
   if(senha !== RESET_PASSWORD){
+    vibra("erro");
     alert("❌ Senha incorreta!");
+    
+    // retomando câmera caso pausada
+    if(scanner && paused){
+      scanner.resume();
+      paused = false;
+    } else if(!scanner){
+      iniciarCamera();
+    }
+
     return;
   }
+
+  vibra("ok");
 
   Object.values(familias).forEach(f=>f.entrou=false);
   historico = [];
@@ -195,32 +172,100 @@ btnReset.onclick=()=>{
   localStorage.setItem("familias", JSON.stringify(familias));
   localStorage.setItem("historico", "[]");
 
+  document.getElementById("resultado").innerHTML = "Aguardando leitura...";
+  document.getElementById("listaHistorico").innerHTML = "";
+
   atualizarResumo();
-  atualizarHistorico();
 
-  alert("✔ Reset concluído com sucesso!");
+  alert("✔ Reset concluído!");
 
-  // 🔧 Reiniciar a câmera após reset
   setTimeout(()=>{
     pararCamera();
     iniciarCamera();
-    paused = false;
-  }, 300);
+  },500);
 };
-document.body.appendChild(btnReset);
 
-// ===== INICIALIZAÇÃO =====
-window.onload=()=>{
-  document.getElementById("btnCamera").onclick = iniciarCamera;
-  document.getElementById("btnParar").onclick = pararCamera;
 
-  const salvo = localStorage.getItem("familias");
-  if(salvo){ familias=JSON.parse(salvo); } 
-  else { carregarLista(); }
+/* ===== Câmara ===== */
+
+document.getElementById("btnStart").onclick = iniciarCamera;
+document.getElementById("btnStop").onclick = pararCamera;
+
+async function iniciarCamera(){
+  if(scanner) return;
+
+  scanner = new Html5Qrcode("reader");
+
+  scanner.start(
+    { facingMode:"environment" },
+    { fps:10, qrbox:{ width:250, height:250 }},
+    resultadoQR
+  );
+
+  paused = false;
+}
+
+function pararCamera(){
+  if(!scanner) return;
+  scanner.stop();
+  scanner.clear();
+  scanner=null;
+}
+
+
+/* ===== Leitura ===== */
+
+let ultima = null;
+
+function resultadoQR(text){
+
+  if(text===ultima) return;
+  ultima=text;
+  setTimeout(()=>ultima=null,1300);
+
+  const id = text.trim().toUpperCase();
+
+  const fam = familias[id];
+
+  if(!fam){
+    document.getElementById("resultado").innerHTML = "❌ QR inválido!";
+    mostrarOverlay("rgba(255,0,0,0.6)");
+    vibra("erro");
+    return;
+  }
+
+  if(fam.entrou){
+    document.getElementById("resultado").innerHTML = `⚠️ <b>${fam.nome}</b> já entrou!`;
+    mostrarOverlay("rgba(255,165,0,0.6)");
+    vibra("erro");
+    return;
+  }
+
+  // registrar entrada
+  fam.entrou = true;
+  const hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+
+  historico.unshift({ nome:fam.nome, adultos:fam.adultos, criancas:fam.criancas, hora });
+
+  localStorage.setItem("familias", JSON.stringify(familias));
+  localStorage.setItem("historico", JSON.stringify(historico));
+
+  document.getElementById("resultado").innerHTML = `
+    ✔️ <b>${fam.nome}</b><br>
+    ${fam.adultos} adultos • ${fam.criancas} crianças<br>
+    ${hora}
+  `;
+
+  vibra("ok");
+  mostrarOverlay("rgba(0,200,0,0.6)");
 
   atualizarResumo();
   atualizarHistorico();
-};
+}
+
+/* ===== Init ===== */
+atualizarResumo();
+atualizarHistorico();
 </script>
 </body>
 </html>
