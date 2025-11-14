@@ -203,11 +203,26 @@ async function onScanSuccess(decodedText){
   }
 
   // temos família válida
-  if(fam.entrou){
-    alert(`⚠️ ${fam.nome} já entrou anteriormente.`);
-    atualizarResumo(); atualizarHistorico();
+  if (fam.entrou) {
+    alert(`⚠️ ${fam.nome} já entrou anteriormente!`);
+    atualizarResumo();
+    atualizarHistorico();
+
+    // Reinicia a câmera automaticamente sem travar
+    setTimeout(() => {
+        if(html5QrcodeScanner){
+            html5QrcodeScanner.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                decodedText => onScanSuccess(decodedText),
+                err => {}
+            );
+        }
+    }, 800);
+
     return;
-  }
+}
+
 
   // marca entrada
   fam.entrou = true;
